@@ -2354,7 +2354,7 @@ function EnhancedResultsStep({
                     <div className="scatter-insight-rank">#{item.rank}</div>
                     <div className="scatter-insight-name">{getCompoundDisplayName(item)}</div>
                     <div className="scatter-insight-meta">
-                      {locale === 'zh' ? '????' : 'Probability'} {item.prob.toFixed(4)}
+                      {locale === 'zh' ? '预测概率' : 'Probability'} {item.prob.toFixed(4)}
                     </div>
                   </div>
                 ))}

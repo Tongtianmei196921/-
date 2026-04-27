@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import ssl
 from functools import lru_cache
 from pathlib import Path
@@ -16,6 +17,7 @@ import pandas as pd
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 REPO_CACHE_DIR = REPO_ROOT / ".repo_cache"
+MAX_REPO_DOWNLOAD_BYTES = int(os.getenv("DRUGREFLECTOR_MAX_REPO_DOWNLOAD_MB", "100")) * 1024 * 1024
 
 SAMPLE_INFO_URL = "https://repo-hub.broadinstitute.org/public/data/repo-sample-annotation-20240610.txt"
 DRUG_INFO_URL = "https://repo-hub.broadinstitute.org/public/data/repo-drug-annotation-20200324.txt"
@@ -53,7 +55,10 @@ def _download_text(url: str, cache_name: str) -> str:
     for _ in range(3):
         try:
             with urlopen(request, timeout=120, context=context) as response:
-                raw = response.read()
+                raw = response.read(MAX_REPO_DOWNLOAD_BYTES + 1)
+            if len(raw) > MAX_REPO_DOWNLOAD_BYTES:
+                limit_mb = MAX_REPO_DOWNLOAD_BYTES // (1024 * 1024)
+                raise ValueError(f"Annotation file is too large to process safely: {url} (>{limit_mb} MB)")
             cache_path.write_bytes(raw)
             return raw.decode("utf-8", errors="replace")
         except (HTTPError, URLError) as exc:  # pragma: no cover - network dependent

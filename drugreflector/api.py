@@ -30,6 +30,18 @@ STATIC_DIR = APP_DIR / "static"
 FRONTEND_DIST_DIR = REPO_ROOT / "frontend" / "dist"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 CHECKPOINT_NAMES = ["model_fold_0.pt", "model_fold_1.pt", "model_fold_2.pt"]
+DEFAULT_CORS_ORIGINS = [
+    "https://drugreflector.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+MAX_UPLOAD_BYTES = int(os.getenv("DRUGREFLECTOR_MAX_UPLOAD_MB", "200")) * 1024 * 1024
+MAX_REPORT_SAMPLES = int(os.getenv("DRUGREFLECTOR_MAX_REPORT_SAMPLES", "5"))
+MAX_REPORT_ROWS = int(os.getenv("DRUGREFLECTOR_MAX_REPORT_ROWS", "1000"))
+MIN_N_TOP = 1
+MAX_N_TOP = 500
 
 
 def _default_checkpoint_paths() -> list[str]:
@@ -107,7 +119,7 @@ class GeoPredictRequest(BaseModel):
 class ReportRequest(BaseModel):
     response: dict[str, object]
     sample: str | None = None
-    locale: str = Field(default="zh")
+    locale: str = Field(default="zh", max_length=8)
 
 
 _MODEL_LOCK = Lock()
@@ -139,6 +151,71 @@ def get_model() -> DrugReflector:
         except Exception as exc:  # pragma: no cover
             _MODEL_ERROR = str(exc)
             raise
+
+
+def _cors_origins() -> list[str]:
+    raw_origins = os.getenv("DRUGREFLECTOR_CORS_ORIGINS", "").strip()
+    if not raw_origins:
+        return DEFAULT_CORS_ORIGINS
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+
+def _validate_n_top(n_top: int) -> int:
+    try:
+        value = int(n_top)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="n_top must be an integer.") from exc
+    if value < MIN_N_TOP or value > MAX_N_TOP:
+        raise HTTPException(
+            status_code=422,
+            detail=f"n_top must be between {MIN_N_TOP} and {MAX_N_TOP}.",
+        )
+    return value
+
+
+async def _read_upload_limited(file: UploadFile) -> bytes:
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Uploaded file is too large. Maximum allowed size is {limit_mb} MB.",
+        )
+    return content
+
+
+def _validate_report_request(request: ReportRequest) -> str:
+    locale = request.locale.lower().strip()
+    if locale not in {"zh", "en"}:
+        raise HTTPException(status_code=422, detail="locale must be 'zh' or 'en'.")
+
+    data = request.response.get("data")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Report response must contain data.")
+
+    samples = data.get("samples") or []
+    if not isinstance(samples, list) or len(samples) > MAX_REPORT_SAMPLES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Report request is too large. Maximum samples: {MAX_REPORT_SAMPLES}.",
+        )
+
+    results = data.get("results") or {}
+    if not isinstance(results, dict):
+        raise HTTPException(status_code=422, detail="Report response results are invalid.")
+
+    row_count = 0
+    for rows in results.values():
+        if not isinstance(rows, list):
+            raise HTTPException(status_code=422, detail="Report result rows are invalid.")
+        row_count += len(rows)
+    if row_count > MAX_REPORT_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Report request is too large. Maximum result rows: {MAX_REPORT_ROWS}.",
+        )
+
+    return locale
 
 
 def _predictions_to_payload(
@@ -237,7 +314,7 @@ def _generate_sample_csv() -> str:
 async def _uploaded_file_to_adata(file: UploadFile):
     filename = file.filename or ""
     extension = Path(filename).suffix.lower()
-    content = await file.read()
+    content = await _read_upload_limited(file)
 
     try:
         if extension == ".h5ad":
@@ -273,7 +350,7 @@ async def _prepare_uploaded_file(
     sample_id_column: str | None = None,
 ):
     filename = file.filename or ""
-    content = await file.read()
+    content = await _read_upload_limited(file)
     if not filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
 
@@ -318,6 +395,34 @@ def _friendly_geo_error(exc: ValueError, accession: str) -> str:
     return message
 
 
+def _public_geo_error(exc: ValueError, accession: str) -> str:
+    message = str(exc)
+    accession = accession.upper()
+    if "unknown url type" in message and "NONE" in message:
+        return (
+            f"{accession} 的 GEO 记录里包含 NONE 这类空的补充文件链接，"
+            "系统已判定它不是可下载的表达矩阵。请更换 GEO 编号，"
+            "或先把该数据集整理成 h5ad / CSV 表达矩阵后再上传。"
+        )
+    if (
+        "does not expose an expression matrix" in message
+        or "no per-sample supplementary expression files" in message
+    ):
+        return (
+            f"{accession} 暂时不能自动解析：series matrix 中没有可用表达矩阵，"
+            "也没有逐样本表达补充文件。请换一个包含表达矩阵的 GEO，"
+            "或下载原始 / 处理后数据整理成 h5ad / CSV 后上传。"
+        )
+    if "differential miRNA table" in message or "miRNA IDs cannot be objectively treated as genes" in message:
+        return (
+            f"{accession} 找到了作者提供的差异 miRNA 表，但这不是普通基因差异表达表。"
+            "DrugReflector 需要人类基因符号作为输入，不能把 miRNA ID 直接当作基因。"
+            "如需分析该数据，请先基于可靠数据库完成 miRNA 靶基因映射并形成基因级 signature，"
+            "或上传整理好的基因差异表。"
+        )
+    return message
+
+
 app = FastAPI(
     title="DrugReflector API",
     version="1.0.0",
@@ -325,7 +430,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -409,7 +514,7 @@ def api_geo_preview(accession: str) -> dict[str, object]:
     try:
         return preview_geo(accession)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=_friendly_geo_error(exc, accession)) from exc
+        raise HTTPException(status_code=422, detail=_public_geo_error(exc, accession)) from exc
 
 
 @app.post("/api/geo/predict")
@@ -435,7 +540,7 @@ def api_geo_predict(request: GeoPredictRequest) -> dict[str, object]:
             case_keyword=request.case_keyword,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=_friendly_geo_error(exc, request.accession)) from exc
+        raise HTTPException(status_code=422, detail=_public_geo_error(exc, request.accession)) from exc
 
     model = get_model()
     predictions = model.predict(frame, n_top=request.n_top)
@@ -473,16 +578,17 @@ def api_geo_predict(request: GeoPredictRequest) -> dict[str, object]:
 
 @app.post("/api/report/docx")
 def api_report_docx(request: ReportRequest) -> StreamingResponse:
+    locale = _validate_report_request(request)
     try:
         content = build_docx_report(
             request.response,
             sample=request.sample,
-            locale=request.locale,
+            locale=locale,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Could not generate report: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Could not generate report.") from exc
 
     sample_name = (request.sample or "report").replace("/", "_").replace("\\", "_")
     filename = f"drugreflector_{sample_name}_report.docx"
@@ -530,6 +636,7 @@ async def predict_h5ad(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
 
+    n_top = _validate_n_top(n_top)
     adata = await _uploaded_file_to_adata(file)
     model = get_model()
     predictions = model.predict(adata, n_top=n_top)
@@ -563,6 +670,7 @@ async def api_predict(
     group2_value: str | None = Form(default=None),
     sample_id_column: str | None = Form(default=None),
 ) -> dict[str, object]:
+    n_top = _validate_n_top(n_top)
     status = checkpoint_status()
     if not status["all_ready"]:
         checkpoint_dir = status["checkpoint_dir"]

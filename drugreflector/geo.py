@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import gzip
 import io
+import os
 import re
 from http.client import IncompleteRead
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from .utils import compute_vscores_adata
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 GEO_CACHE_DIR = REPO_ROOT / ".geo_cache"
+MAX_GEO_DOWNLOAD_BYTES = int(os.getenv("DRUGREFLECTOR_MAX_GEO_DOWNLOAD_MB", "500")) * 1024 * 1024
 
 _CONTROL_HINTS = (
     "control",
@@ -157,7 +159,10 @@ def _cached_download(url: str, cache_name: str) -> bytes:
     for _ in range(3):
         try:
             with urlopen(url, timeout=120) as response:
-                data = response.read()
+                data = response.read(MAX_GEO_DOWNLOAD_BYTES + 1)
+            if len(data) > MAX_GEO_DOWNLOAD_BYTES:
+                limit_mb = MAX_GEO_DOWNLOAD_BYTES // (1024 * 1024)
+                raise ValueError(f"GEO resource is too large to process safely: {url} (>{limit_mb} MB)")
             cache_path.write_bytes(data)
             return data
         except IncompleteRead as exc:  # pragma: no cover - network dependent
