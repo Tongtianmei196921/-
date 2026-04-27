@@ -132,8 +132,14 @@ interface GeoRunConfig {
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`
+}
+
 async function fetchCheckpoints(): Promise<CheckpointStatus> {
-  const res = await fetch('/api/checkpoints')
+  const res = await fetch(apiUrl('/api/checkpoints'))
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
@@ -171,7 +177,7 @@ async function runPrediction(file: File, nTop: number, prep?: PrepOptions): Prom
   if (prep?.group1_value) form.append('group1_value', prep.group1_value)
   if (prep?.group2_value) form.append('group2_value', prep.group2_value)
   if (prep?.sample_id_column) form.append('sample_id_column', prep.sample_id_column)
-  const res = await fetch('/api/predict', { method: 'POST', body: form })
+  const res = await fetch(apiUrl('/api/predict'), { method: 'POST', body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: '未知错误' }))
     throw new Error(err.detail || `HTTP ${res.status}`)
@@ -180,7 +186,7 @@ async function runPrediction(file: File, nTop: number, prep?: PrepOptions): Prom
 }
 
 async function previewGeo(accession: string): Promise<GeoPreviewResponse> {
-  const res = await fetch(`/api/geo/preview?accession=${encodeURIComponent(accession)}`)
+  const res = await fetch(apiUrl(`/api/geo/preview?accession=${encodeURIComponent(accession)}`))
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Unknown GEO error' }))
     throw new Error(err.detail || `HTTP ${res.status}`)
@@ -189,7 +195,7 @@ async function previewGeo(accession: string): Promise<GeoPreviewResponse> {
 }
 
 async function runGeoPrediction(config: GeoRunConfig, nTop: number): Promise<PredictionResponse> {
-  const res = await fetch('/api/geo/predict', {
+  const res = await fetch(apiUrl('/api/geo/predict'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...config, n_top: nTop }),
@@ -208,7 +214,7 @@ async function prepareFileInput(file: File, prep?: PrepOptions): Promise<Prepara
   if (prep?.group1_value) form.append('group1_value', prep.group1_value)
   if (prep?.group2_value) form.append('group2_value', prep.group2_value)
   if (prep?.sample_id_column) form.append('sample_id_column', prep.sample_id_column)
-  const res = await fetch('/api/prepare-input', { method: 'POST', body: form })
+  const res = await fetch(apiUrl('/api/prepare-input'), { method: 'POST', body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Unknown preparation error' }))
     throw new Error(err.detail || `HTTP ${res.status}`)
@@ -218,7 +224,7 @@ async function prepareFileInput(file: File, prep?: PrepOptions): Promise<Prepara
 }
 
 async function downloadWordReport(response: PredictionResponse, sample: string, locale: Locale) {
-  const res = await fetch('/api/report/docx', {
+  const res = await fetch(apiUrl('/api/report/docx'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ response, sample, locale }),
