@@ -290,6 +290,27 @@ async def _prepare_uploaded_file(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _friendly_geo_error(exc: ValueError, accession: str) -> str:
+    message = str(exc)
+    accession = accession.upper()
+    if "unknown url type" in message and "NONE" in message:
+        return (
+            f"{accession} 的 GEO 记录里包含 NONE 这类空的补充文件链接，"
+            "系统已判定它不是可下载的表达矩阵。请更换 GEO 编号，"
+            "或先把该数据集整理成 h5ad / CSV 表达矩阵后再上传。"
+        )
+    if (
+        "does not expose an expression matrix" in message
+        or "no per-sample supplementary expression files" in message
+    ):
+        return (
+            f"{accession} 暂时不能自动解析：series matrix 中没有可用表达矩阵，"
+            "也没有逐样本表达补充文件。请换一个包含表达矩阵的 GEO，"
+            "或下载原始/处理后数据整理成 h5ad / CSV 后上传。"
+        )
+    return message
+
+
 app = FastAPI(
     title="DrugReflector API",
     version="1.0.0",
@@ -381,7 +402,7 @@ def api_geo_preview(accession: str) -> dict[str, object]:
     try:
         return preview_geo(accession)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=_friendly_geo_error(exc, accession)) from exc
 
 
 @app.post("/api/geo/predict")
@@ -407,7 +428,7 @@ def api_geo_predict(request: GeoPredictRequest) -> dict[str, object]:
             case_keyword=request.case_keyword,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=_friendly_geo_error(exc, request.accession)) from exc
 
     model = get_model()
     predictions = model.predict(frame, n_top=request.n_top)
