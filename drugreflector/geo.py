@@ -10,6 +10,7 @@ from http.client import IncompleteRead
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin
 from urllib.request import urlopen
 
 import numpy as np
@@ -124,6 +125,14 @@ def _platform_annotation_url(platform_id: str) -> str:
     return (
         "https://ftp.ncbi.nlm.nih.gov/geo/platforms/"
         f"{_bucket_prefix(platform_id, 'GPL')}/{platform_id}/annot/{platform_id}.annot.gz"
+    )
+
+
+def _series_supplementary_url(accession: str) -> str:
+    accession = accession.upper()
+    return (
+        "https://ftp.ncbi.nlm.nih.gov/geo/series/"
+        f"{_bucket_prefix(accession, 'GSE')}/{accession}/suppl/"
     )
 
 
@@ -437,6 +446,143 @@ def _load_supplementary_expression(sample_metadata: pd.DataFrame) -> tuple[pd.Da
     return frame, column
 
 
+def _list_series_supplementary_files(accession: str) -> list[str]:
+    base_url = _series_supplementary_url(accession)
+    raw = _cached_download(base_url, f"{accession.upper()}_suppl_index.html")
+    text = raw.decode("utf-8", errors="replace")
+    files: list[str] = []
+    for href in re.findall(r'href="([^"]+)"', text, flags=re.IGNORECASE):
+        if href.startswith("?") or href.startswith("/") or href == "../":
+            continue
+        normalized = _normalize_geo_url(urljoin(base_url, href))
+        if normalized:
+            files.append(normalized)
+    return files
+
+
+def _read_supplementary_table(url: str, accession: str) -> pd.DataFrame:
+    cache_name = f"{accession.upper()}_{Path(url).name}"
+    raw = _cached_download(url, cache_name)
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    lower = Path(url).name.lower()
+    if lower.endswith((".csv", ".csv.gz")):
+        return pd.read_csv(io.BytesIO(raw))
+    if lower.endswith((".tsv", ".tsv.gz", ".txt", ".txt.gz")):
+        return pd.read_csv(io.BytesIO(raw), sep=None, engine="python")
+    raise ValueError(f"Unsupported supplementary table format: {Path(url).name}")
+
+
+def _select_differential_table(accession: str) -> tuple[str, pd.DataFrame] | None:
+    candidates = []
+    for url in _list_series_supplementary_files(accession):
+        name = Path(url).name.lower()
+        if not name.endswith((".csv", ".csv.gz", ".tsv", ".tsv.gz", ".txt", ".txt.gz")):
+            continue
+        score = 0
+        if any(token in name for token in ["regression", "differential", "diff", "limma", "deg", "result"]):
+            score += 10
+        if any(token in name for token in ["count", "cnt", "norm"]):
+            score -= 4
+        candidates.append((score, url))
+    for _, url in sorted(candidates, reverse=True):
+        try:
+            frame = _read_supplementary_table(url, accession)
+        except Exception:
+            continue
+        columns = [_canonical_name(column) for column in frame.columns]
+        has_feature = any(name in columns for name in ["gene", "genesymbol", "symbol", "mirna", "feature"])
+        has_score = any("logfc" in name or name in {"stat", "score", "t"} for name in columns)
+        if has_feature and has_score:
+            return url, frame
+    return None
+
+
+def _feature_column(frame: pd.DataFrame) -> str | None:
+    preferred = ["gene", "genesymbol", "symbol", "geneid", "mirna", "feature"]
+    normalized = {_canonical_name(column): str(column) for column in frame.columns}
+    for name in preferred:
+        if name in normalized:
+            return normalized[name]
+    return str(frame.columns[0]) if len(frame.columns) else None
+
+
+def _score_column(frame: pd.DataFrame) -> str | None:
+    columns = [str(column) for column in frame.columns]
+    preferred_tokens = ["ageadj.logfc", "logfc", "stat", "score", "t"]
+    ranked: list[tuple[int, str]] = []
+    for column in columns:
+        name = _canonical_name(column)
+        if "pvalue" in name or "qvalue" in name or "padj" in name:
+            continue
+        for idx, token in enumerate(preferred_tokens):
+            if token in name:
+                ranked.append((len(preferred_tokens) - idx, column))
+                break
+    ranked.sort(reverse=True)
+    return ranked[0][1] if ranked else None
+
+
+def _looks_like_mirna_features(values: pd.Series, column: str) -> bool:
+    column_name = _canonical_name(column)
+    if "mirna" in column_name:
+        return True
+    sample = values.dropna().astype(str).str.lower().head(50)
+    if sample.empty:
+        return False
+    return float(sample.str.match(r"^(hsa-)?(mir|miR|let-|hsa-let-)").mean()) >= 0.5
+
+
+def _load_series_differential_signature(accession: str) -> tuple[pd.DataFrame, dict[str, object]]:
+    selected = _select_differential_table(accession)
+    if selected is None:
+        raise ValueError(
+            f"GEO accession {accession} does not expose an expression matrix in the series matrix "
+            "and no per-sample supplementary expression files or gene-level differential table were found."
+        )
+    url, table = selected
+    feature_column = _feature_column(table)
+    score_column = _score_column(table)
+    if not feature_column or not score_column:
+        raise ValueError(f"Could not identify feature and score columns in {Path(url).name}.")
+    if _looks_like_mirna_features(table[feature_column], feature_column):
+        raise ValueError(
+            f"GEO accession {accession} provides a differential miRNA table ({Path(url).name}), "
+            "not a human gene-level differential expression table. DrugReflector requires gene symbols; "
+            "miRNA IDs cannot be objectively treated as genes without an additional validated target-mapping step."
+        )
+
+    work = table[[feature_column, score_column]].copy()
+    work.columns = ["gene", "score"]
+    work["gene"] = work["gene"].map(_extract_gene_symbol)
+    work["score"] = pd.to_numeric(work["score"], errors="coerce")
+    work = work.dropna(subset=["gene", "score"])
+    work = work.groupby("gene", sort=False)["score"].mean()
+    if work.empty:
+        raise ValueError(f"Differential table {Path(url).name} did not contain usable gene-level scores.")
+    frame = pd.DataFrame([work], index=[f"{accession.upper()}:{Path(url).name}:{score_column}"])
+    metadata = {
+        "accession": accession.upper(),
+        "platform_id": None,
+        "organism": "Homo sapiens",
+        "symbol_source": f"supplementary_differential:{feature_column}",
+        "expression_source": f"supplementary_differential:{Path(url).name}",
+        "ortholog_mapping": None,
+        "used_log2": False,
+        "group_column": None,
+        "group1_value": None,
+        "group2_value": None,
+        "group1_count": None,
+        "group2_count": None,
+        "n_samples_total": None,
+        "n_genes": int(frame.shape[1]),
+        "mode": "author_differential_table",
+        "differential_score_column": score_column,
+        "differential_table_url": url,
+    }
+    return frame, metadata
+
+
 def _map_mouse_ensembl_to_human_symbols(
     gene_ids: pd.Index,
     *,
@@ -697,7 +843,31 @@ def infer_geo_grouping(
 
 
 def preview_geo(accession: str) -> dict[str, object]:
-    dataset = load_geo_dataset(accession)
+    accession = accession.strip().upper()
+    try:
+        dataset = load_geo_dataset(accession)
+    except ValueError as exc:
+        if "does not expose an expression matrix" not in str(exc):
+            raise
+        frame, metadata = _load_series_differential_signature(accession)
+        return {
+            "accession": accession,
+            "n_samples": 0,
+            "n_probe_rows": int(frame.shape[1]),
+            "n_genes": int(frame.shape[1]),
+            "platform_id": metadata.get("platform_id"),
+            "organism": metadata.get("organism"),
+            "symbol_source": metadata.get("symbol_source"),
+            "expression_source": metadata.get("expression_source"),
+            "ortholog_mapping": metadata.get("ortholog_mapping"),
+            "used_log2": metadata.get("used_log2"),
+            "detected_grouping": None,
+            "candidate_columns": [],
+            "sample_preview": [],
+            "mode": metadata.get("mode"),
+            "differential_score_column": metadata.get("differential_score_column"),
+            "differential_table_url": metadata.get("differential_table_url"),
+        }
 
     candidate_columns = []
     for column in dataset.sample_metadata.columns:
@@ -756,7 +926,13 @@ def build_geo_signature(
     control_keyword: str | None = None,
     case_keyword: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    dataset = load_geo_dataset(accession)
+    accession = accession.strip().upper()
+    try:
+        dataset = load_geo_dataset(accession)
+    except ValueError as exc:
+        if "does not expose an expression matrix" in str(exc):
+            return _load_series_differential_signature(accession)
+        raise
     if dataset.organism and dataset.organism.lower() != "homo sapiens" and dataset.symbol_source != "mouse_to_human_orthologs":
         raise ValueError(
             f"GEO accession {dataset.accession} is {dataset.organism}. "

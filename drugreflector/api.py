@@ -308,6 +308,13 @@ def _friendly_geo_error(exc: ValueError, accession: str) -> str:
             "也没有逐样本表达补充文件。请换一个包含表达矩阵的 GEO，"
             "或下载原始/处理后数据整理成 h5ad / CSV 后上传。"
         )
+    if "differential miRNA table" in message or "miRNA IDs cannot be objectively treated as genes" in message:
+        return (
+            f"{accession} 找到了作者提供的差异 miRNA 表，但这不是普通基因差异表达表。"
+            "DrugReflector 需要人类基因符号作为输入，不能把 miRNA ID 直接当作基因。"
+            "如需分析该数据，请先基于可靠数据库完成 miRNA 靶基因映射并形成基因级 signature，"
+            "或上传整理好的基因差异表。"
+        )
     return message
 
 
