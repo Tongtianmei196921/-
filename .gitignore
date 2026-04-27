@@ -68,3 +68,5 @@ results/
 
 # Documentation build
 docs/_build/
+
+.vercel
