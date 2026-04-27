@@ -55,6 +55,11 @@ docs = [
     "sphinx-rtd-theme",
     "myst-parser",
 ]
+api = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/drugreflector"
@@ -74,7 +79,7 @@ drugreflector = "."
 "drugreflector.signature_refinement" = "signature_refinement"
 
 [tool.setuptools.package-data]
-drugreflector = ["*.md", "*.txt"]
+drugreflector = ["*.md", "*.txt", "static/*"]
 
 [tool.black]
 line-length = 88

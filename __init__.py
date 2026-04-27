@@ -1,25 +1,22 @@
-"""
-DrugReflector
+"""Compatibility exports for the source-root package layout."""
 
-A minimal implementation for compound ranking predictions from gene expression signatures
-using ensemble neural network models.
-"""
-
-from .drugreflector import DrugReflector, EnsembleModel, nnFC
-from .utils import (
-    load_h5ad_file, 
-    create_synthetic_gene_expression,
-    compute_vscores,
+from .drugreflector import (
+    DrugReflector,
+    EnsembleModel,
+    SignatureRefinement,
     compute_vscore_two_groups,
+    compute_vscores,
     compute_vscores_adata,
-    pseudobulk_adata
+    create_synthetic_gene_expression,
+    load_h5ad_file,
+    nnFC,
+    pseudobulk_adata,
 )
-from .signature_refinement import SignatureRefinement
 
 __version__ = "1.0.0"
 __all__ = [
     "DrugReflector",
-    "EnsembleModel", 
+    "EnsembleModel",
     "nnFC",
     "load_h5ad_file",
     "create_synthetic_gene_expression",
@@ -27,5 +24,5 @@ __all__ = [
     "compute_vscore_two_groups",
     "compute_vscores_adata",
     "pseudobulk_adata",
-    "SignatureRefinement"
+    "SignatureRefinement",
 ]

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DrugReflector Lab Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <main class="shell">
+      <section class="hero card">
+        <div class="eyebrow">DrugReflector</div>
+        <h1>Rank candidate compounds from a transcriptional signature.</h1>
+        <p class="lede">
+          This UI is for research screening. You provide either an
+          <code>.h5ad</code> matrix or a prepared v-score signature, and the
+          model returns compounds ranked by predicted relevance.
+        </p>
+        <p class="lede cn">
+          这是一个科研筛药界面。你提供转录组 signature，系统会返回更值得优先验证的候选化合物排序。
+        </p>
+        <div class="hero-grid">
+          <div class="hero-stat">
+            <span class="stat-label">Purpose</span>
+            <strong>Prioritize compounds for follow-up experiments</strong>
+          </div>
+          <div class="hero-stat">
+            <span class="stat-label">Input</span>
+            <strong>V-scores or H5AD expression matrix</strong>
+          </div>
+          <div class="hero-stat">
+            <span class="stat-label">Output</span>
+            <strong>Rank, logit, and probability for each compound</strong>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <a class="button ghost" href="/docs" target="_blank" rel="noreferrer">Open API Docs</a>
+          <button class="button ghost" id="refresh-health" type="button">Refresh Status</button>
+        </div>
+      </section>
+
+      <section class="quickstart card">
+        <div class="panel-head">
+          <h2>Quick Start</h2>
+          <p>Three practical steps for a first run.</p>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <span class="step-index">01</span>
+            <h3>Prepare a signature</h3>
+            <p>Use either a v-score list like <code>TP53,1.2</code> or a preprocessed <code>.h5ad</code> file.</p>
+          </div>
+          <div class="step">
+            <span class="step-index">02</span>
+            <h3>Run ranking</h3>
+            <p>Choose the input mode below, set <code>Top N</code>, and submit the job.</p>
+          </div>
+          <div class="step">
+            <span class="step-index">03</span>
+            <h3>Export results</h3>
+            <p>Download CSV or JSON and use the ranking as a short list for follow-up experiments.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="status-strip card">
+        <div>
+          <div class="status-label">Service Status</div>
+          <div id="health-summary" class="status-value">Checking model status...</div>
+        </div>
+        <div>
+          <div class="status-label">Model Library</div>
+          <div id="health-models" class="status-value">Loading...</div>
+        </div>
+        <div>
+          <div class="status-label">Expected Use</div>
+          <div id="health-mode" class="status-value">Signature-driven compound prioritization</div>
+        </div>
+      </section>
+
+      <section class="workbench">
+        <div class="panel card">
+          <div class="panel-head">
+            <h2>Run a Prediction</h2>
+            <p>Choose the input mode that matches your data.</p>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Prediction input types">
+            <button class="tab is-active" id="tab-vscores" data-target="panel-vscores" type="button">Paste V-scores</button>
+            <button class="tab" id="tab-h5ad" data-target="panel-h5ad" type="button">Upload H5AD</button>
+          </div>
+
+          <section class="tab-panel is-active" id="panel-vscores" aria-labelledby="tab-vscores">
+            <form id="vscores-form" class="stack">
+              <label class="field">
+                <span>Signature name</span>
+                <input id="signature-name" name="signature-name" type="text" value="demo_signature" />
+              </label>
+
+              <label class="field">
+                <span>Top compounds to return</span>
+                <input id="vscores-topn" name="vscores-topn" type="number" value="20" min="1" max="500" />
+              </label>
+
+              <label class="field">
+                <span>Gene scores</span>
+                <textarea id="vscores-text" name="vscores-text" spellcheck="false">TP53,1.2
+EGFR,-0.4
+CDKN1A,0.8
+JUN,0.5
+FOS,0.3</textarea>
+              </label>
+
+              <p class="hint">
+                One gene per line. Use either <code>GENE,score</code> or <code>GENE score</code>.
+              </p>
+              <p class="hint" id="gene-count-hint">5 genes detected in the current text box.</p>
+
+              <div class="actions">
+                <button class="button primary" type="submit">Run V-score Prediction</button>
+                <button class="button ghost" id="load-example" type="button">Load Example</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="tab-panel" id="panel-h5ad" aria-labelledby="tab-h5ad">
+            <form id="h5ad-form" class="stack">
+              <label class="field">
+                <span>Top compounds to return</span>
+                <input id="h5ad-topn" name="h5ad-topn" type="number" value="20" min="1" max="500" />
+              </label>
+
+              <label class="field">
+                <span>Upload file</span>
+                <input id="h5ad-file" name="h5ad-file" type="file" accept=".h5ad" />
+              </label>
+
+              <p class="hint">
+                Best for preprocessed data. This model is most reliable when the uploaded matrix already represents a usable signature or a compatible expression input.
+              </p>
+
+              <div class="actions">
+                <button class="button primary" type="submit">Run H5AD Prediction</button>
+              </div>
+            </form>
+          </section>
+        </div>
+
+        <aside class="panel card explainer">
+          <div class="panel-head">
+            <h2>What This Tool Does</h2>
+          </div>
+          <div class="info-block">
+            <h3>Use case</h3>
+            <p>
+              You start with a disease, perturbation, or cell-state transition signature and ask:
+              which compounds are most aligned with this transcriptional pattern?
+            </p>
+          </div>
+          <div class="info-block">
+            <h3>What the scores mean</h3>
+            <p>
+              <strong>Rank</strong> is the compound ordering, <strong>logit</strong> is the raw model score,
+              and <strong>prob</strong> is a normalized confidence-like value from the model output.
+            </p>
+          </div>
+          <div class="info-block">
+            <h3>中文说明</h3>
+            <p>
+              这个工具更像“候选药物优先级打分器”，不是原始单细胞数据的一站式分析流水线。
+              最适合已经整理出疾病或状态变化 signature 之后，做候选化合物初筛。
+            </p>
+          </div>
+          <div class="info-block">
+            <h3>What it is not</h3>
+            <p>
+              This is not an end-to-end single-cell pipeline. It does not replace QC, normalization,
+              differential expression, or biological validation.
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="results card">
+        <div class="panel-head">
+          <h2>Results</h2>
+          <p id="result-caption">Run a prediction to populate the table.</p>
+        </div>
+        <div class="results-toolbar">
+          <button class="button ghost is-small" id="download-csv" type="button" disabled>Download CSV</button>
+          <button class="button ghost is-small" id="download-json" type="button" disabled>Download JSON</button>
+        </div>
+        <div id="message" class="message" aria-live="polite"></div>
+        <div id="results-container" class="results-container">
+          <div class="empty-state">
+            <p>No predictions yet. Submit a signature or H5AD file to see ranked compounds.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+  </html>

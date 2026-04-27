@@ -44,6 +44,20 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+.api_pid
+.api_port
+.claude/
+.geo_cache/
+.playwright-mcp/
+.repo_cache/
+*.egg-info/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+smoke_report.docx
+smoke_report_media/
+__pycache__/
+*.pyc
 
 # Output files
 *.csv
