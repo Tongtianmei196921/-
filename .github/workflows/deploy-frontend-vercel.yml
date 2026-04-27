@@ -34,12 +34,15 @@ jobs:
 
       - name: Pull Vercel project settings
         if: env.VERCEL_TOKEN != ''
+        working-directory: frontend
         run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Build frontend
         if: env.VERCEL_TOKEN != ''
+        working-directory: frontend
         run: vercel build --prod --token "$VERCEL_TOKEN"
 
       - name: Deploy frontend
         if: env.VERCEL_TOKEN != ''
+        working-directory: frontend
         run: vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN"
