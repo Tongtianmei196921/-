@@ -31,6 +31,9 @@ def _configure_matplotlib_font() -> fm.FontProperties | None:
         Path(r"C:\Windows\Fonts\msyhbd.ttc"),
         Path(r"C:\Windows\Fonts\simhei.ttf"),
         Path(r"C:\Windows\Fonts\simsun.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
     ]
     for path in candidates:
         if not path.exists():
