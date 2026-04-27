@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
-      - "vercel.json"
+      - "frontend/vercel.json"
       - ".github/workflows/deploy-frontend-vercel.yml"
   workflow_dispatch:
 
