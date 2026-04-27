@@ -1,0 +1,53 @@
+name: Deploy backend to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "LICENSE.txt"
+      - "hf-space.README.md"
+      - "drugreflector/**"
+      - "signature_refinement/**"
+      - ".github/workflows/deploy-backend-huggingface.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: huggingface-backend-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HF_SPACE_ID: Qiangaoqing/drugreflector-api
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip when Hugging Face token is missing
+        if: env.HF_TOKEN == ''
+        run: echo "HF_TOKEN is not configured. Add it in GitHub Actions secrets to enable automatic backend deployment."
+
+      - name: Install Hugging Face CLI
+        if: env.HF_TOKEN != ''
+        run: python -m pip install --upgrade "huggingface_hub[cli]"
+
+      - name: Ensure Docker Space exists
+        if: env.HF_TOKEN != ''
+        run: hf repo create "$HF_SPACE_ID" --repo-type space --space_sdk docker --exist-ok --token "$HF_TOKEN"
+
+      - name: Upload Space metadata
+        if: env.HF_TOKEN != ''
+        run: hf upload "$HF_SPACE_ID" hf-space.README.md README.md --repo-type space --token "$HF_TOKEN" --commit-message "Update Space metadata"
+
+      - name: Upload backend files
+        if: env.HF_TOKEN != ''
+        run: |
+          hf upload "$HF_SPACE_ID" Dockerfile Dockerfile --repo-type space --token "$HF_TOKEN" --commit-message "Update Dockerfile"
+          hf upload "$HF_SPACE_ID" pyproject.toml pyproject.toml --repo-type space --token "$HF_TOKEN" --commit-message "Update Python package config"
+          hf upload "$HF_SPACE_ID" LICENSE.txt LICENSE.txt --repo-type space --token "$HF_TOKEN" --commit-message "Update license"
+          hf upload "$HF_SPACE_ID" drugreflector drugreflector --repo-type space --token "$HF_TOKEN" --exclude "__pycache__/*" "*.pyc" --commit-message "Update backend package"
+          hf upload "$HF_SPACE_ID" signature_refinement signature_refinement --repo-type space --token "$HF_TOKEN" --exclude "__pycache__/*" "*.pyc" --commit-message "Update signature refinement module"

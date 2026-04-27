@@ -1,0 +1,45 @@
+name: Deploy frontend to Vercel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "vercel.json"
+      - ".github/workflows/deploy-frontend-vercel.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-frontend-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_qlUVYwRm9yI7cSs7CrearCAQ
+      VERCEL_PROJECT_ID: prj_wVmJTNXhu85s1LEsgudazZ9M5T6l
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip when Vercel token is missing
+        if: env.VERCEL_TOKEN == ''
+        run: echo "VERCEL_TOKEN is not configured. Add it in GitHub Actions secrets to enable automatic frontend deployment."
+
+      - name: Install Vercel CLI
+        if: env.VERCEL_TOKEN != ''
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel project settings
+        if: env.VERCEL_TOKEN != ''
+        run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+      - name: Build frontend
+        if: env.VERCEL_TOKEN != ''
+        run: vercel build --prod --token "$VERCEL_TOKEN"
+
+      - name: Deploy frontend
+        if: env.VERCEL_TOKEN != ''
+        run: vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN"
