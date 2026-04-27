@@ -138,6 +138,21 @@ function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`
 }
 
+function normalizeUserError(message: unknown): string {
+  const text = String(message || '').trim()
+  if (!text) return '未知错误'
+  if (text.includes('unknown url type') && text.includes('NONE')) {
+    return '该 GEO 记录包含 NONE 这类空的补充文件链接，系统已判定它不是可下载表达矩阵。请更换 GEO 编号，或下载原始数据整理成 h5ad / 表达矩阵后上传。'
+  }
+  if (
+    text.includes('does not expose an expression matrix') ||
+    text.includes('no per-sample supplementary expression files')
+  ) {
+    return '该 GEO 暂时不能自动解析：series matrix 中没有可用表达矩阵，也没有逐样本表达补充文件。请换一个包含表达矩阵的 GEO，或把数据整理成 h5ad / CSV 后上传。'
+  }
+  return text
+}
+
 async function fetchCheckpoints(): Promise<CheckpointStatus> {
   const res = await fetch(apiUrl('/api/checkpoints'))
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -189,7 +204,7 @@ async function previewGeo(accession: string): Promise<GeoPreviewResponse> {
   const res = await fetch(apiUrl(`/api/geo/preview?accession=${encodeURIComponent(accession)}`))
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Unknown GEO error' }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    throw new Error(normalizeUserError(err.detail || `HTTP ${res.status}`))
   }
   return res.json()
 }
@@ -202,7 +217,7 @@ async function runGeoPrediction(config: GeoRunConfig, nTop: number): Promise<Pre
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Unknown GEO error' }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    throw new Error(normalizeUserError(err.detail || `HTTP ${res.status}`))
   }
   return res.json()
 }

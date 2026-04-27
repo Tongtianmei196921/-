@@ -129,6 +129,10 @@ def _platform_annotation_url(platform_id: str) -> str:
 
 def _normalize_geo_url(url: str) -> str:
     cleaned = str(url).strip().strip('"')
+    if cleaned.lower() in _INVALID_SYMBOLS:
+        return ""
+    if not re.match(r"^(https?|ftp)://", cleaned, flags=re.IGNORECASE):
+        return ""
     if cleaned.startswith("ftp://ftp.ncbi.nlm.nih.gov/"):
         return "https://ftp.ncbi.nlm.nih.gov/" + cleaned.removeprefix("ftp://ftp.ncbi.nlm.nih.gov/")
     return cleaned
@@ -370,7 +374,8 @@ def _pick_supplementary_column(sample_metadata: pd.DataFrame) -> str | None:
     ranked: list[tuple[tuple[int, int, int], str]] = []
     for column in supplementary_columns:
         values = sample_metadata[column].fillna("").astype(str).str.strip()
-        non_empty = [value for value in values.tolist() if value]
+        non_empty = [_normalize_geo_url(value) for value in values.tolist()]
+        non_empty = [value for value in non_empty if value]
         if len(non_empty) != len(sample_metadata.index):
             continue
         joined = " ".join(non_empty).lower()
