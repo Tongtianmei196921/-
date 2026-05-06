@@ -1,0 +1,48 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/official-site-module/Dockerfile.api
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: tiniuni-drugreflector-api:1.0.0
+    container_name: tiniuni-drugreflector-api
+    restart: unless-stopped
+    environment:
+      PORT: "8000"
+      DRUGREFLECTOR_CHECKPOINT_DIR: /app/checkpoints
+      DRUGREFLECTOR_CORS_ORIGINS: ${DRUGREFLECTOR_CORS_ORIGINS:-https://www.tiniuni-bio.com,http://www.tiniuni-bio.com}
+      DRUGREFLECTOR_MAX_UPLOAD_MB: ${DRUGREFLECTOR_MAX_UPLOAD_MB:-300}
+      DRUGREFLECTOR_MAX_GEO_DOWNLOAD_MB: ${DRUGREFLECTOR_MAX_GEO_DOWNLOAD_MB:-500}
+      DRUGREFLECTOR_MAX_REPO_DOWNLOAD_MB: ${DRUGREFLECTOR_MAX_REPO_DOWNLOAD_MB:-100}
+    volumes:
+      - ../../checkpoints:/app/checkpoints:ro
+      - geo-cache:/app/.geo_cache
+      - repo-cache:/app/.repo_cache
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/checkpoints"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/official-site-module/Dockerfile.web
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/drugreflector/}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/drugreflector-api}
+    image: tiniuni-drugreflector-web:1.0.0
+    container_name: tiniuni-drugreflector-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${DRUGREFLECTOR_WEB_BIND:-127.0.0.1:18080}:80"
+
+volumes:
+  geo-cache:
+  repo-cache:
