@@ -4,7 +4,40 @@
 
 DrugReflector 的模型排序不直接等于 Reverse 或 Mimic。Reverse / Mimic 只能来自真实 signed connectivity 证据，例如 CLUE / CMap / LINCS L1000 Touchstone 查询结果。
 
-如果没有真实 signed connectivity 表，系统会继续显示 `No objective evidence`，不会猜测方向。
+当前后端支持两类真实方向证据：
+
+1. 优先读取用户配置的真实 CLUE / LINCS signed connectivity 结果表。
+2. 如果没有配置结果表，则自动调用 Ma’ayan Lab L1000CDS2 公开 API，对输入 up/down genes 分别做 reverse 与 mimic 查询。
+
+如果真实查询失败，或候选化合物不在真实返回结果中，系统会继续显示 `No objective evidence`，不会猜测方向。
+
+## 一键真实方向查询
+
+默认已启用 L1000CDS2 真实查询，无需 CLUE 私钥：
+
+```bash
+DRUGREFLECTOR_L1000CDS2_ENABLED=1
+```
+
+可选参数：
+
+```bash
+DRUGREFLECTOR_L1000CDS2_TOP_GENES=150
+DRUGREFLECTOR_L1000CDS2_TIMEOUT_SECONDS=20
+DRUGREFLECTOR_L1000CDS2_DB_VERSION=latest
+DRUGREFLECTOR_L1000CDS2_SCORE_THRESHOLD=0
+```
+
+解释：
+
+| 参数 | 含义 |
+|---|---|
+| `DRUGREFLECTOR_L1000CDS2_TOP_GENES` | 每个 signature 取前多少个上调/下调基因提交查询 |
+| `DRUGREFLECTOR_L1000CDS2_TIMEOUT_SECONDS` | 外部 API 超时时间 |
+| `DRUGREFLECTOR_L1000CDS2_DB_VERSION` | L1000CDS2 数据库版本，默认 latest |
+| `DRUGREFLECTOR_L1000CDS2_SCORE_THRESHOLD` | 方向判定最低分数，默认 0，只要真实结果匹配即显示 |
+
+注意：L1000CDS2 返回的是 LINCS 小分子扰动签名的 top results。如果 DrugReflector 某个候选化合物没有出现在 L1000CDS2 reverse/mimic top results 中，仍会显示 `No objective evidence`。
 
 ## 支持的真实证据表格式
 
@@ -86,4 +119,3 @@ outputs/GSE198138_processed/clue_query/
 | `clue_query_gene_set_mapping_stats.csv` | symbol 到 Entrez ID 的映射统计 |
 
 CLUE 官方 Query API 通常需要 user key，并使用 up/down gene sets 查询 L1000 Touchstone。拿到真实结果后，把化合物编号和 signed connectivity 分数整理成上面的 CSV/TSV 格式，部署时设置 `DRUGREFLECTOR_CONNECTIVITY_TABLE` 即可。
-

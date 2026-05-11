@@ -247,6 +247,30 @@ def _predictions_to_payload(
     return payload
 
 
+def _compound_direction_aliases(
+    annotations: dict[str, dict[str, object]] | None,
+) -> dict[str, list[str]]:
+    aliases: dict[str, list[str]] = {}
+    annotations = annotations or {}
+    for compound, annotation in annotations.items():
+        values: list[str] = [str(compound)]
+        for key in [
+            "display_name",
+            "chemical_name",
+            "pubchem_title",
+            "vendor_name",
+            "full_broad_id",
+        ]:
+            value = annotation.get(key)
+            if value:
+                values.append(str(value))
+        synonyms = annotation.get("synonyms")
+        if isinstance(synonyms, list):
+            values.extend(str(value) for value in synonyms if value)
+        aliases[str(compound)] = list(dict.fromkeys(values))
+    return aliases
+
+
 def _frame_to_adata(frame: pd.DataFrame):
     import anndata
 
@@ -559,7 +583,11 @@ def api_geo_predict(request: GeoPredictRequest) -> dict[str, object]:
         str(sample_name): list(predictions[("prob", str(sample_name))].sort_values(ascending=False).index)
         for sample_name in frame.index
     }
-    direction_evidence = get_direction_evidence(frame, compounds_by_sample)
+    direction_evidence = get_direction_evidence(
+        frame,
+        compounds_by_sample,
+        compound_aliases=_compound_direction_aliases(annotations),
+    )
     input_quality = _input_quality_summary(frame)
     payload = _predictions_to_payload(
         predictions,
@@ -624,7 +652,11 @@ def predict_vscores(request: PredictRequest) -> dict[str, object]:
         str(sample_name): list(predictions[("prob", str(sample_name))].sort_values(ascending=False).index)
         for sample_name in frame.index
     }
-    direction_evidence = get_direction_evidence(frame, compounds_by_sample)
+    direction_evidence = get_direction_evidence(
+        frame,
+        compounds_by_sample,
+        compound_aliases=_compound_direction_aliases(annotations),
+    )
     input_quality = _input_quality_summary(frame)
     return {
         "n_signatures": len(request.signatures),
@@ -655,7 +687,11 @@ async def predict_h5ad(
         str(sample_name): list(predictions[("prob", str(sample_name))].sort_values(ascending=False).index)
         for sample_name in adata.obs_names.astype(str)
     }
-    direction_evidence = get_direction_evidence(adata, compounds_by_sample)
+    direction_evidence = get_direction_evidence(
+        adata,
+        compounds_by_sample,
+        compound_aliases=_compound_direction_aliases(annotations),
+    )
     input_quality = _input_quality_summary(adata)
     return {
         "input_file": file.filename,
@@ -713,7 +749,11 @@ async def api_predict(
         str(sample_name): list(predictions[("prob", str(sample_name))].sort_values(ascending=False).index)
         for sample_name in adata.obs_names.astype(str)
     }
-    direction_evidence = get_direction_evidence(adata, compounds_by_sample)
+    direction_evidence = get_direction_evidence(
+        adata,
+        compounds_by_sample,
+        compound_aliases=_compound_direction_aliases(annotations),
+    )
     input_quality = _input_quality_summary(adata)
     payload = _predictions_to_payload(
         predictions,
