@@ -24,6 +24,26 @@ APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 GEO_CACHE_DIR = REPO_ROOT / ".geo_cache"
 MAX_GEO_DOWNLOAD_BYTES = int(os.getenv("DRUGREFLECTOR_MAX_GEO_DOWNLOAD_MB", "500")) * 1024 * 1024
+SUPPORTED_SUPPLEMENTARY_EXPRESSION_SUFFIXES = (
+    ".csv",
+    ".csv.gz",
+    ".tsv",
+    ".tsv.gz",
+    ".txt",
+    ".txt.gz",
+    ".tab",
+    ".tab.gz",
+)
+RAW_SINGLE_CELL_SUFFIXES = (
+    ".cloupe",
+    ".cloupe.gz",
+    ".tar",
+    ".tar.gz",
+    ".h5",
+    ".h5.gz",
+    ".h5ad",
+    ".h5ad.gz",
+)
 
 _CONTROL_HINTS = (
     "control",
@@ -147,6 +167,28 @@ def _normalize_geo_url(url: str) -> str:
     if cleaned.startswith("ftp://ftp.ncbi.nlm.nih.gov/"):
         return "https://ftp.ncbi.nlm.nih.gov/" + cleaned.removeprefix("ftp://ftp.ncbi.nlm.nih.gov/")
     return cleaned
+
+
+def _geo_url_name(url: str) -> str:
+    return Path(str(url).split("?", 1)[0]).name.lower()
+
+
+def _is_supported_supplementary_expression_url(url: str) -> bool:
+    return _geo_url_name(url).endswith(SUPPORTED_SUPPLEMENTARY_EXPRESSION_SUFFIXES)
+
+
+def _has_raw_single_cell_supplement(sample_metadata: pd.DataFrame) -> bool:
+    supplementary_columns = [
+        column
+        for column in sample_metadata.columns
+        if "supplementary file" in _canonical_name(column)
+    ]
+    for column in supplementary_columns:
+        for value in sample_metadata[column].fillna("").astype(str):
+            normalized = _normalize_geo_url(value)
+            if normalized and _geo_url_name(normalized).endswith(RAW_SINGLE_CELL_SUFFIXES):
+                return True
+    return False
 
 
 def _cached_download(url: str, cache_name: str) -> bytes:
@@ -392,6 +434,8 @@ def _pick_supplementary_column(sample_metadata: pd.DataFrame) -> str | None:
         non_empty = [value for value in non_empty if value]
         if len(non_empty) != len(sample_metadata.index):
             continue
+        if not all(_is_supported_supplementary_expression_url(value) for value in non_empty):
+            continue
         joined = " ".join(non_empty).lower()
         rank = (
             1 if "normalized" in joined else 0,
@@ -409,13 +453,34 @@ def _parse_supplementary_expression_file(raw: bytes, sample_id: str) -> pd.Serie
     else:
         text = raw.decode("utf-8", errors="replace")
 
-    frame = pd.read_csv(
-        io.StringIO(text),
-        sep=r"\s+|,",
-        engine="python",
-        comment="#",
-        header=None,
-    )
+    parse_errors: list[str] = []
+    frame = None
+    for separator in (None, "\t", ","):
+        try:
+            frame = pd.read_csv(
+                io.StringIO(text),
+                sep=separator,
+                engine="python",
+                comment="#",
+                header=None,
+            )
+            break
+        except Exception as exc:
+            parse_errors.append(str(exc))
+    if frame is None:
+        try:
+            frame = pd.read_csv(
+                io.StringIO(text),
+                sep=r"\s+",
+                engine="python",
+                comment="#",
+                header=None,
+            )
+        except Exception as exc:
+            detail = parse_errors[0] if parse_errors else str(exc)
+            raise ValueError(
+                f"Supplementary expression file for {sample_id} could not be parsed as a simple text matrix: {detail}"
+            ) from exc
     if frame.shape[1] < 2:
         raise ValueError(f"Supplementary expression file for {sample_id} does not contain at least two columns.")
 
@@ -671,6 +736,13 @@ def load_geo_dataset(accession: str) -> GeoDataset:
     if expression_by_probe.empty:
         supplementary = _load_supplementary_expression(sample_metadata)
         if supplementary is None:
+            if _has_raw_single_cell_supplement(sample_metadata):
+                raise ValueError(
+                    f"GEO accession {accession} does not expose an expression matrix in the series matrix. "
+                    "It appears to provide raw or single-cell viewer/archive supplementary files "
+                    "such as .cloupe, .h5, .tar, or 10x analysis archives instead of a ready gene-by-sample matrix. "
+                    "Please upload a processed h5ad file or a gene-level expression/differential table."
+                )
             raise ValueError(
                 f"GEO accession {accession} does not expose an expression matrix in the series matrix "
                 "and no per-sample supplementary expression files were found."
@@ -852,7 +924,10 @@ def preview_geo(accession: str) -> dict[str, object]:
     try:
         dataset = load_geo_dataset(accession)
     except ValueError as exc:
-        if "does not expose an expression matrix" not in str(exc):
+        message = str(exc)
+        if "single-cell viewer/archive" in message or "10x analysis archive" in message:
+            raise
+        if "does not expose an expression matrix" not in message:
             raise
         frame, metadata = _load_series_differential_signature(accession)
         return {
@@ -935,7 +1010,10 @@ def build_geo_signature(
     try:
         dataset = load_geo_dataset(accession)
     except ValueError as exc:
-        if "does not expose an expression matrix" in str(exc):
+        message = str(exc)
+        if "single-cell viewer/archive" in message or "10x analysis archive" in message:
+            raise
+        if "does not expose an expression matrix" in message:
             return _load_series_differential_signature(accession)
         raise
     if dataset.organism and dataset.organism.lower() != "homo sapiens" and dataset.symbol_source != "mouse_to_human_orthologs":

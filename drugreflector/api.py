@@ -380,6 +380,16 @@ def _friendly_geo_error(exc: ValueError, accession: str) -> str:
         "does not expose an expression matrix" in message
         or "no per-sample supplementary expression files" in message
     ):
+        if (
+            "single-cell viewer/archive" in message
+            or ".cloupe" in message
+            or "10x analysis archives" in message
+        ):
+            return (
+                f"{accession} 暂时不能直接自动分析：该 GEO 没有提供可直接使用的基因表达矩阵，"
+                "而是提供了 .cloupe、.tar、.h5 或 10x analysis archive 这类单细胞原始/浏览器文件。"
+                "这些文件需要先经过单细胞流程整理成 h5ad、伪 bulk 表达矩阵或基因级差异表后再上传。"
+            )
         return (
             f"{accession} 暂时不能自动解析：series matrix 中没有可用表达矩阵，"
             "也没有逐样本表达补充文件。请换一个包含表达矩阵的 GEO，"
